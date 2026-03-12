@@ -276,6 +276,4 @@ Background processing is powered by **BullMQ** running over an **Upstash Redis**
 
 ---
 
-## 📝 License
 
-This project is licensed under the ISC License.
