@@ -190,17 +190,92 @@ npm run build
 
 The production-ready files will be in `frontend/dist/`.
 
+## 📡 API Documentation
+
+### 1. `POST /api/upload`
+Uploads a file for text extraction and analytics processing.
+- **Headers:** `Content-Type: multipart/form-data`
+- **Body:** `file` (File), `name` (String, optional), `email` (String, optional)
+- **Response:**
+  ```json
+  {
+    "success": true,
+    "message": "File accepted for processing",
+    "data": {
+      "fileId": 1,
+      "jobId": 1,
+      "bullJobId": "12",
+      "status": "pending"
+    },
+    "jobId": 1
+  }
+  ```
+
+### 2. `GET /api/jobs/:id`
+Check the progress and retrieve the analytics results of a specific processing job.
+- **Response (Completed):**
+  ```json
+  {
+    "success": true,
+    "data": {
+      "jobId": "1",
+      "state": "completed",
+      "progress": 100,
+      "wordCount": 1250,
+      "paragraphCount": 15,
+      "topKeywords": ["analysis", "data", "report", "growth", "results"]
+    }
+  }
+  ```
+
+### 3. `GET /api/jobs?status=all&page=1&limit=20`
+Fetch a paginated list of all uploaded jobs and their current statuses.
+
+### 4. `POST /api/interest`
+Submit lead form data from the marketing flow.
+- **Body:** `name`, `email`, `selectedStep`
+
 ---
 
-## 📡 API Endpoints
+## 🗄️ Database Schema (NeonDB / PostgreSQL)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/health` | Health check |
-| `POST` | `/api/upload` | Upload a file for analysis |
-| `GET` | `/api/jobs` | Get all job statuses |
-| `POST` | `/api/interest` | Submit interest/lead form |
+The system relies on a relational Postgres database consisting of 4 tables:
+
+1. **`Users`**: Stores uploader contact information.
+   - `id` (PK), `name` (VARCHAR), `email` (UNIQUE VARCHAR)
+2. **`Files`**: Tracks uploaded documents.
+   - `id` (PK), `user_id` (FK -> Users), `file_path` (TEXT), `uploaded_at` (TIMESTAMP)
+3. **`Jobs`**: Tracks BullMQ background processing state.
+   - `id` (PK), `file_id` (FK -> Files), `status` (VARCHAR: pending/completed/failed), `progress` (INTEGER), `created_at` (TIMESTAMP)
+4. **`Results`**: Stores the output of the text analytics pipeline.
+   - `id` (PK), `job_id` (FK -> Jobs), `word_count` (INTEGER), `paragraph_count` (INTEGER), `keywords` (JSONB)
 
 ---
 
+## ⚙️ Worker & Queue Configuration (BullMQ)
 
+Background processing is powered by **BullMQ** running over an **Upstash Redis** instance.
+
+### Queue Configuration (`src/queues/fileQueue.js`)
+- **Name:** `file-processing`
+- **Options:** 
+  - Standard Priority `2`, PDF Priority `1`
+  - Attempts: 3 (with exponential backoff)
+  - Retention: Keeps completed jobs for 1 hour (max 100), failed jobs for 24 hours.
+
+### Worker Pipeline (`src/workers/fileWorker.js`)
+- **Concurrency:** Processes up to `3` files simultaneously.
+- **Rate Limiting:** Maximum of `10` jobs processed per minute to prevent CPU overload during heavy PDF parsing.
+- **Processing Steps:**
+  1. Validates and reads the file from local disk.
+  2. Extracts text directly (for `.txt`) or uses `pdf-parse` (for `.pdf`).
+  3. Calculates exact Word Count and intelligent Paragraph Count via formatting heuristics.
+  4. Filters common stop words and extracts the Top 5 Keywords based on frequency.
+  5. Pushes progress updates (10% → 60% → 80% → 100%) back to the database.
+  6. Persists final analytics payload to the `Results` table.
+
+---
+
+## 📝 License
+
+This project is licensed under the ISC License.
